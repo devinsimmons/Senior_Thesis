@@ -4,7 +4,6 @@
 #compared to the flux tower's measurements over the same 8 day period
 
 import arcpy 
-from os import listdir
 
 arcpy.env.overwriteOutput = True
 
@@ -81,6 +80,7 @@ test1 = modis_et(in_towers, "CA-Qcu", out_folder)
 test1.make_buffer(1692)
 
 #without these lines the program had trouble reading the HDF files
+#originally i did os.listdir on the folder but arcpy could read the hdf that way
 arcpy.env.workspace = in_rasters
 rasters = arcpy.ListRasters("*", "HDF")
 
