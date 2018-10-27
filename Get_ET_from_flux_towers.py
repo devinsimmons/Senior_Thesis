@@ -1,13 +1,17 @@
-
+#the csv file from ameriflux that the script analyzes
 file = r"figure_for_1st_pres/AMF_CA-Qcu_BASE_HH_1-1.csv"
 
 fileobj = open(file, 'r')
-
 content = fileobj.readlines()
-
 fileobj.close()
+
+#dictionary that holds each day as a key. each key's value is a dictionary
+#that contains the number of et measurements taken that day (out of a possible 48),
+#and the cumulative evapotranspiration amount in millimeters
 et_dict = {}
-#will contain each year and its associated error
+#this dictionary will hold each year as the key. each key's value is 
+#a dictionary that contains both sides of the energy balance closure error
+#equation. these values are used to determine the flux tower's error for the given year
 year_dict = {}
 
 for i in range(100, len(content) - 100):
@@ -22,8 +26,7 @@ for i in range(100, len(content) - 100):
         et_dict[date] = {}
         et_dict[date]['et'] = 0
         et_dict[date]['measurements'] = 0
-        et_dict[date]['left error'] = 0
-        et_dict[date]['right error'] = 0
+
     
     #adds each year to the year dictionary
     if year not in year_dict:
@@ -31,18 +34,20 @@ for i in range(100, len(content) - 100):
         year_dict[year]['left error'] = 0
         year_dict[year]['right error'] = 0
     
+    #variables that we care about for determining error
     h = float(entries[9]) #sensible heat turbulent flux, w/m^2
     g = float(entries[13]) #soil heat flux, w/m^2
     rn = float(entries[24]) #net radiation, w/m^2
     le = float(entries[11]) #latent heat turbulent flux
     #checks if these variables were measured and determines the error
     if h != -9999 and g != -9999 and rn != -9999 and le != -9999:
+        #according to the energy balance closure error equation, Rn - G should equal LE + H
         left = rn - g
         right = le + h
         year_dict[year]['left error'] += left
         year_dict[year]['right error'] += right
             
-    
+    #variables needed to determine evapotranspiration
     le = float(entries[11]) #latent heat turbulent flux
     ta = float(entries[3]) #air temp
     
@@ -93,20 +98,17 @@ for i in range(100, len(content) - 100):
             #to show how many measurements were taken
             et_dict[date]['et'] += evapotranspiration
             et_dict[date]['measurements']+= 1
-    
+
+            
+#calculates error for each year based on the energy balance closure equation
 for i in year_dict:
     left = year_dict[i]['left error']
     right = year_dict[i]['right error']
     if left != 0 and right != 0:
         year_dict[i]['error'] = (abs(left - right)/right + abs(left - right)/left)/2
-    
-'''shows all days with 48 measurements
-counter = 0
-for i in et_dict:
-    if et_dict[i]['measurements'] == 48:
-        print("{} {}".format(i, et_dict[i]['et']))
-        counter += 1
-'''
+
+#sample day ranges that I ran this script on. these date ranges are correlated
+#to MOD16A2 date ranges
 days = [str(i) for i in range(20080601, 20080609)]
 days1 = [str(i) for i in range(20080609, 20080617)]
 days2 = [str(i) for i in range(20080703, 20080711)]
@@ -125,9 +127,9 @@ all_days = [days, days1, days2, days3, days4, days5, days6, days7, days8, days9]
 from datetime import datetime
 
 for day in all_days:
+    
     et_counter = 0
     measurement_counter = 0
-    #these represent the left and right sides of the energy closure balance error equation
     
     #takes first day from the list of days, converts it to
     #a julian day. this matches the format 
@@ -135,24 +137,16 @@ for day in all_days:
     jd = datetime.strftime(dt, '%Y%j')
     print(day[0])
     print(jd)
+    
     for i in day:
+        #we can only use days that have all 48 measurements filled in
         if et_dict[i]['measurements'] == 48:
             et_counter += et_dict[i]['et']
             measurement_counter += 1
-            
+    #to match the 8 day ranges to MODIS ranges, at least five of the 8 days should
+    #have all 48 measurements. Then the days with 48 are averaged over the 8 day period
     et_averaged = (et_counter * 8) / measurement_counter
     print(et_averaged)
     print('\n')
 print(year_dict)
 
-#mod = [197, 228, 235, 237, 239, 240, 242, 242, 246, 253, 271, 275]
-#print(sum(mod)/len(mod)/10)
-    
-'''tells how much et in a given year
-counter = 0
-for i in et_dict:
-    if str(i[0:4]) == '2010':
-        counter += et_dict[i]['et']
-        print(et_dict[i]['et'])
-print(counter)
-'''
