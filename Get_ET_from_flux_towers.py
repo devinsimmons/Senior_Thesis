@@ -135,6 +135,8 @@ for day in all_days:
     #a julian day. this matches the format 
     dt = datetime.strptime(day[0], '%Y%m%d')
     jd = datetime.strftime(dt, '%Y%j')
+    #i want to see the julian day that starts the 8 day period because this
+    #is how the modis data is labelled
     print(day[0])
     print(jd)
     
