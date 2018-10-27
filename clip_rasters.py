@@ -1,3 +1,8 @@
+#this script creates the class modis_et. This class can take the shapefile containing flux tower locations,
+#select a specific flux tower, create a buffer around it at the desired distance, and then clip the MOD16
+#raster to that buffer. It can also determine the mean of the raster pixels in this buffer area. This average is 
+#compared to the flux tower's measurements over the same 8 day period
+
 import arcpy 
 from os import listdir
 
@@ -12,8 +17,11 @@ class modis_et:
     
     '''
     def __init__(self, flux_towers, tower_name, output_env):
+        #flux towers is a shapefile
         self.flux_towers = flux_towers
+        #tower name is a string that matches the "fluxnetid" attribute
         self.tower_name = tower_name
+        #folder path
         self.output_env = output_env
 
     '''
@@ -28,6 +36,7 @@ class modis_et:
         tower_layer = arcpy.MakeFeatureLayer_management(self.flux_towers, "tower_layer")
         tower = arcpy.SelectLayerByAttribute_management(tower_layer, "NEW_SELECTION",
                                                         ''' "fluxnetid" = '{}' '''.format(self.tower_name))
+        
         #makes a layer out of the chosen tower, buffers it, creates a shapefile of the buffer
         arcpy.CopyFeatures_management(tower, self.output_env + r"/chosen_tower.shp")
         tower = self.output_env + r"/chosen_tower.shp"
@@ -55,7 +64,7 @@ class modis_et:
                               self.buffer_fc, '#', "ClippingGeometry")
 
     '''
-    returns mean et in millimeters
+    returns mean et in millimeters for the clipped raster
     '''
     @property
     def mean_et(self):
