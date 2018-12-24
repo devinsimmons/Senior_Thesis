@@ -926,17 +926,3 @@ in_flux = test_flux.valid_8day_by_year(2008)
 test_flux.yearly_error()
 #visualizes linreg of flux ET vs. MOD16 ET
 test_flux.linreg_et_plot(in_flux, mod16_values)
-
-
-        
-        
-        
-                                                
-                                        
-        
-        
-
-    
-        
-
-
