@@ -71,12 +71,11 @@ class modis_et:
 
 
 class flux_reader:
+    
     '''
     infile is a filepath string
     read_file opens the input csv file, gets content into a list,
     then closes the file
-    this class has functions that analyze and visualize flux tower ET
-    it also has functions to perform error calculation
     '''
     def __init__(self, infile):
         self.infile = infile
@@ -137,6 +136,8 @@ class flux_reader:
     '''
     goes through all lines in the file, gets ET for each day based on half hour measurements,
     fills gaps based on values from adjacent days
+    this function also determines error based on gap-filling and random error in LE measurements
+    for each day
     '''
     def et_by_day(self):
         self.et_dict = {}
@@ -160,25 +161,57 @@ class flux_reader:
                 self.et_dict[date]['real measurements'] = []
                 #filled and real measurements combined
                 self.et_dict[date]['measurements'] = 0
+                #a list that will contain the difference between et measurements
+                #on the given day and et measurements taken at the same time on the
+                #previous and/or preceding day
+                self.et_dict[date]['paired et'] = []
+                #will contain random error, in mm, for et measurements
+                self.et_dict[date]['random error'] = 0
+                
                     
             #variables needed to determine evapotranspiration
-            le = float(entries[11]) #latent heat turbulent flux
-            #ta = float(entries[3]) #air temp
-    
+            le = float(entries[11]) #latent heat turbulent flux, w/m^2
+            
+            ta = float(entries[3]) #air temp, degrees c
+            ws = float(entries[6]) #wind speed, m/s
+            ppfd = float(entries[26]) - float(entries[29]) #difference between incoming and outgoing ppfd, µmolPhoton m-2 s-1
+            
             #determines if there are missing values for LE or temperature. if not the
             #evapotranspiration is calculated
             #commented out. for now I'm looking into using a latent heat
             #of vaporization constant
             #if le != -9999 and ta != -9999:
             if le != -9999:
-                #evapotranspiration = float(entries[11]) * 60 * 30 / ((2.501 - 0.002361 * float(entries[3])) * 10 ** 6)
-                evapotranspiration = le * 60 * 30 / ((2.501) * 10 ** 6)
+                #evapotranspiration
+                et = le * 60 * 30 / ((2.501) * 10 ** 6)
                 #cumulates the et measurements for each day and adds a value
                 #to show how many measurements were taken
-                self.et_dict[date]['et'] += evapotranspiration
-                self.et_dict[date]['real measurements'].append(evapotranspiration)
+                self.et_dict[date]['et'] += et
+                self.et_dict[date]['real measurements'].append(et)
                 self.et_dict[date]['measurements']+= 1
-       
+                
+                #these lines will determine the difference between le and le on the two adjdacent days
+                #this is used to determine random error
+                
+                #previous day
+                entries_neg_1 = self.content[i - 48].split(',')
+                #the next day
+                entries1 = self.content[i + 48].split(',')
+                
+                adjacent_days = [entries_neg_1, entries1]
+                
+                for day in adjacent_days:
+                    #these values will be compared to le, ta etc. 
+                    le2 = float(day[11])
+                    ta2 = float(day[3]) 
+                    ws2 = float(day[6]) 
+                    ppfd2 = float(day[26]) - float(day[29])
+                    #check if comparison of le can be made
+                    #the environmental conditions need to be nearly identical
+                    if le2 != -9999 and (abs(ta - ta2) < 3) and (abs(ppfd - ppfd2) < 75) and (abs(ws - ws2) < 1):
+                        et2 = le2 * 60 * 30 / ((2.501) * 10 ** 6)
+                        #adds the difference between et, et on adjacent day to this list
+                        self.et_dict[date]['paired et'].append(et - et2)
         
             #if there are missing values ET is determined based on values in adjacent rows
             else:
@@ -217,6 +250,14 @@ class flux_reader:
                 #which makes it easier to calculate gap filling error
                 self.et_dict[date]['real measurements'].append('null')
         
+        #this goes through each day, determines the standard deviation of
+        #paired et measurements, and uses this value to determine random error
+        #for that day
+        for day in self.et_dict:
+            if len(self.et_dict[day]['paired et']) > 1:
+                #calculate random error
+                self.et_dict[day]['random error'] = 2 * float(statistics.stdev(self.et_dict[day]['paired et']) / (2**0.5))
+                
         
         #all the days in the study period, sorted
         study_days = [day for day in self.et_dict]
@@ -335,7 +376,7 @@ class flux_reader:
         plt.xlabel("Percentage of gaps created and filled in artificial datasets")
         plt.ylabel("Percent error")
         plt.plot(percent_gaps, line, 'r', zorder = 5, 
-                 label='y = {:.2f}x + {:.2f}, R$^2$ = {:.2f}'.format(self.gap_slope, self.gap_intercept, r_value), 
+                 label='y = {:.2f}x + {:.2f}, R$^2$ = {:.2f}'.format(self.gap_slope, self.gap_intercept, r_value ** 2), 
                  color = '#fb9a99', linewidth = 2.5)
         plt.legend()
         
@@ -351,7 +392,7 @@ class flux_reader:
                 self.et_dict[day]['gap error in mm'] = (self.gap_slope * (1 - real_measurements/48) + self.gap_intercept) * self.et_dict[day]['et']
             else:
                 self.et_dict[day]['gap error in mm'] = 0
-                
+            
         return self.et_dict
     
     '''
@@ -364,7 +405,7 @@ class flux_reader:
              
         self.years = years
         #will contain the julian day an 8-day period starts, averaged cumulative
-        #ET over that period, gap-filling error. Vqlues are tuples. ET is the first
+        #ET over that period, gap-filling error, and random error. Vqlues are tuples. ET is the first
         #tuple value
         self.flux_et = {}
         
@@ -400,11 +441,10 @@ class flux_reader:
                         if self.et_dict[jd]['measurements'] == 48:
                             et_counter += self.et_dict[jd]['et']
                             days_counter += 1
-                            error_counter += self.et_dict[jd]['gap error in mm']
+                            #dependent errors, propagated in quadrature
+                            error_counter += (self.et_dict[jd]['gap error in mm']**2 + self.et_dict[jd]['random error']**2)**0.5
                 #need at least five days with all 48 measurements filled in
                 if days_counter > 4:
-                    #need to adjust this dictionary so that it can contain error values as well
-                    #error_averaged = (error_counter * 8) / days_counter
                     et_averaged = (et_counter * 8) / days_counter
                     error_percent = error_counter/et_averaged
                     self.flux_et[i] = et_averaged, error_percent
@@ -416,7 +456,7 @@ class flux_reader:
     '''
     makes plots that compare et data to another dataset (ie MOD16 data)
     date_list is a list of ints that represent the start julian day for the
-    8 day comparison period. can only be called after et_by_day and yearly_error.
+    8 day comparison period. can only be called after et_by_day.
     both flux_et and mod16_et should be dictionaries where the key is
     the julian day (YYYYDDD) and the value is ET. 
     years should be a list of years
@@ -431,12 +471,13 @@ class flux_reader:
         
         flux_et_sorted = []
         modis_et_sorted = []
-        #error is calculated by adding ebr error and gap-filled error percentages 
-        error_sorted = [self.year_dict[i[0:4]]['error']+ abs(self.flux_et[i][1]) for i in flux_keys]
+        #error is calculated using gap-filled error percentages 
+        error_sorted = [abs(self.flux_et[i][1]) for i in flux_keys]
 
         for key in flux_keys:
             flux_et_sorted.append(self.flux_et[key][0])
             modis_et_sorted.append(self.mod16_et[key])
+            
 
         slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(flux_et_sorted, modis_et_sorted)
         modis_et_sorted = np.array(modis_et_sorted)
@@ -461,13 +502,13 @@ class flux_reader:
         flux_et_sorted = np.append(flux_et_sorted, 0)
         flux_et_sorted = np.append(flux_et_sorted, 40)
 
-        plt.xlim(-1, 32)
+        plt.xlim(-1, 34.5)
         plt.ylim(0, 33)
         
         #lin regression line
         line = slope * flux_et_sorted + intercept
         plt.plot(flux_et_sorted, line, 'r', zorder = 5, 
-                 label='y = {:.2f}x + {:.2f}, R$^2$ = {:.2f}'.format(slope, intercept, r_value), 
+                 label='y = {:.2f}x + {:.2f}, R$^2$ = {:.2f}'.format(slope, intercept, r_value ** 2), 
                  color = '#984ea3', linewidth = 2.5)
 
         
@@ -476,9 +517,94 @@ class flux_reader:
         plt.title('Comparison of 8-Day ET at {} Flux Tower'.format(self.tower))
 
         plt.legend()
-        plt.savefig(r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\figures\{}_linreg.png'.format(self.tower), dpi = 350)
+        plt.savefig(r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\figures\{}_linreg2.png'.format(self.tower), dpi = 350)
     
     
+    '''
+    groups the assessesd 8-day periods by year and then does linear regression.
+    can only be called after et_by_day.
+    both flux_et and mod16_et should be dictionaries where the key is
+    the julian day (YYYYDDD) and the value is ET. 
+    years should be a list of years.
+    i don't like this analysis because the amount of 8-day periods a flux
+    tower has records for changes by year
+    '''
+    def annual_et_linreg(self, mod16_et, years):
+        self.years = years
+        self.mod16_et = mod16_et
+        
+        
+        flux_keys = [key for key in self.flux_et]
+        flux_keys.sort()
+        
+        yearly_flux_et = []
+        yearly_mod_et = []
+        
+        error_sorted = []
+        
+        #goes through each year to determine annual flux et, mod16 et, error
+        for year in years:
+            
+            flux_et = 0
+            mod_et = 0
+            error = 0
+            
+            for key in flux_keys:
+                if key[0:4] == str(year):
+                    flux_et += self.flux_et[key][0]
+                    mod_et += self.mod16_et[key]
+                    #error == et * percent error
+                    error += self.flux_et[key][0] * abs(self.flux_et[key][1])
+            
+            yearly_flux_et.append(flux_et)
+            yearly_mod_et.append(mod_et)
+            #error is ET error in mm / ET
+            error_sorted.append(error/flux_et)
+        
+        #stats
+        slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(yearly_flux_et, yearly_mod_et)
+        
+        #turn lists to np arrays
+        yearly_flux_et = np.array(yearly_flux_et)
+        yearly_mod_et = np.array(yearly_mod_et)
+        error_sorted = np.array(error_sorted)
+        
+        plt.xlim(205, 390)
+        plt.ylim(295, 410)
+        
+        
+        plt.style.use('seaborn-darkgrid')
+        
+        #scatter plot of points
+        plt.scatter(yearly_flux_et, yearly_mod_et, color = '#31a354',
+                    zorder = 4, edgecolors = 'black')
+
+        #error bars
+        plt.errorbar(yearly_flux_et, yearly_mod_et, 
+                     xerr = yearly_flux_et * error_sorted,
+                     linewidth = 0, elinewidth = 1, ecolor = 'black',
+                     capsize = 2, zorder = 3)
+    
+    
+        #extends linreg line
+        np_flux_et = np.append(yearly_flux_et, 0)
+        np_flux_et = np.append(np_flux_et, 500)
+        
+        #lin regression line
+        line = slope * np_flux_et + intercept
+        plt.plot(np_flux_et, line, 'r', zorder = 5, 
+                 label='y = {:.2f}x + {:.2f}, R$^2$ = {:.2f}'.format(slope, intercept, r_value ** 2), 
+                 color = '#984ea3', linewidth = 2.5)
+                 
+        plt.xlabel('Flux tower ET measurement in mm')
+        plt.ylabel('MOD16 estimated ET in mm')
+        plt.title('Comparison of Annual ET at {} Flux Tower'.format(self.tower))
+
+        plt.legend()
+        plt.savefig(r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\figures\{}_linreg_annual.png'.format(self.tower), dpi = 350)
+        
+        return yearly_flux_et, yearly_mod_et
+        
     '''
     make a time series plot of flux data vs. modis data
     year should just be one year (may change this)
@@ -516,14 +642,15 @@ class flux_reader:
         plt.scatter(julian_days, flux_et_sorted, color = "#4daf4a", s = 10, zorder = 3)
         plt.scatter(julian_days, modis_et_sorted, color = "#377eb8", s = 10, zorder = 3)
                   
-        #error is calculated as gap-filling error plus ebr error
-        
+        #error is calculated as gap-filling error
         error_sorted = np.array([])
         for i in julian_days:
             jd_year = str(year) + str(i).zfill(3)
             if jd_year in flux_keys:
-                error_sorted = np.append(error_sorted, self.year_dict[str(year)]['error'] + self.flux_et[jd_year][1])
+                #error is a function of gap filling error, random error
+                error_sorted = np.append(error_sorted, abs(self.flux_et[jd_year][1]))
             else:
+                #nan means that nothing will plot
                 error_sorted = np.append(error_sorted, np.nan)
         
         #error bars
@@ -539,7 +666,7 @@ class flux_reader:
         plt.xticks([i for i in range (1, 356, 24)], [i for i in range (1, 356, 24)])
         plt.xlabel("Julian day that 8-day period began")
         plt.ylabel("ET in mm for 8-day period")
-        plt.title("{} Time Series of MOD16 and Flux Tower ET".format(year))
+        plt.title("{} Time Series of MOD16 and Flux Tower ET at {}".format(year, self.tower))
         
         plt.legend(handles = [green, blue])
         
@@ -587,7 +714,7 @@ class flux_reader:
             
             plt.style.use('seaborn-pastel')
             #plots linear regression
-            plt.plot(rn_g, line, 'r', label='y = {:.2f}x + {:.2f}, R$^2$ = {:.2f}'.format(slope,intercept, r_value), color = '#377eb8')
+            plt.plot(rn_g, line, 'r', label='y = {:.2f}x + {:.2f}, R$^2$ = {:.2f}'.format(slope,intercept, r_value ** 2), color = '#377eb8')
                     
             plt.xlabel('Rn - G, W/m$^2$')
             plt.ylabel('LE + H, W/m$^2$')
@@ -602,8 +729,11 @@ class flux_reader:
         return [slope, intercept]
     '''
     returns the root mean square error of the data
+    annual should be a boolean value.
+    false, the default, calculates rmse for 8-day periods
+    true calculates it on a yearly scale
     '''
-    def rmse(self, flux_et, mod16_et):
+    def rmse(self, flux_et, mod16_et, annual = False):
         
         flux_et = flux_et
         mod16_et = mod16_et
@@ -611,17 +741,25 @@ class flux_reader:
         difference = 0
         counter = 0
         
-        for key in flux_et:
-            difference += (flux_et[key][0] - mod16_et[key])**2
-            counter += 1
+        if annual == False:
+            for key in flux_et:
+                difference += (flux_et[key][0] - mod16_et[key])**2
+                counter += 1
+        else: 
+            for i in flux_et:
+                difference += (flux_et[counter] - mod16_et[counter])**2
+                counter += 1
         
         self.root_mse = (difference/counter)**0.5
         return self.root_mse
     
     '''
     determines bias and percent bias of MOD16 relative to flux tower data
+    annual should be a boolean value.
+    false, the default, calculates bias for 8-day periods
+    true calculates it on a yearly scale
     '''
-    def bias(self, flux_et, mod16_et):
+    def bias(self, flux_et, mod16_et, annual = False):
         
         flux_et = flux_et
         mod16_et = mod16_et
@@ -633,12 +771,17 @@ class flux_reader:
         #number of comparisons, or N 
         counter = 0
         
-        for key in flux_et:
-            #eq for bias
-            difference += (mod16_et[key] - flux_et[key][0])
-            counter += 1
-            fet += flux_et[key][0]
-        
+        if annual == False:
+            for key in flux_et:
+                #eq for bias
+                difference += (mod16_et[key] - flux_et[key][0])
+                counter += 1
+                fet += flux_et[key][0]
+        else:
+            for i in range(0, len(flux_et)):
+                difference += (mod16_et[i] - flux_et[i])
+                counter += 1
+                fet += flux_et[i]
         
         self.bias_calc = difference/counter
         #eq for pbias
@@ -663,7 +806,7 @@ class flux_reader:
             fileobj.write("{}, {},".format(i, mod16_et[i]))
             #writes nothing for days where (measurements == 48) < 5
             if i in self.flux_et:
-                error = self.year_dict[str(i[0:4])]['error'] + self.flux_et[i][1]
+                error = abs(self.flux_et[i][1])
                 fileobj.write("{}, {},".format(self.flux_et[i][0], error))
             else:
                 fileobj.write(",,")
