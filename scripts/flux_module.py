@@ -174,14 +174,23 @@ class flux_reader:
             
             ta = float(entries[3]) #air temp, degrees c
             ws = float(entries[6]) #wind speed, m/s
-            ppfd = float(entries[26]) - float(entries[29]) #difference between incoming and outgoing ppfd, ÂµmolPhoton m-2 s-1
+            ppfd = float(entries[25]) - float(entries[28]) #difference between incoming and outgoing ppfd, µmolPhoton m-2 s-1
             
-            #determines if there are missing values for LE or temperature. if not the
+            #this handles the issue at some towers where every single midnight value
+            #is missing
+            if le == -9999 and str(entries[0][-4:]) == '0000':
+                #set et equal to zero
+                et = 0
+                #cumulates the et measurements for each day and adds a value
+                #to show how many measurements were taken
+                self.et_dict[date]['et'] += et
+                self.et_dict[date]['real measurements'].append(et)
+                self.et_dict[date]['measurements']+= 1
+            
+            #determines if there are missing values for LE or temperature. if not, the
             #evapotranspiration is calculated
-            #commented out. for now I'm looking into using a latent heat
-            #of vaporization constant
-            #if le != -9999 and ta != -9999:
-            if le != -9999:
+
+            elif le != -9999:
                 #evapotranspiration
                 et = le * 60 * 30 / ((2.501) * 10 ** 6)
                 #cumulates the et measurements for each day and adds a value
@@ -249,7 +258,7 @@ class flux_reader:
                 #adding this keeps the real measurements list the same length for all days
                 #which makes it easier to calculate gap filling error
                 self.et_dict[date]['real measurements'].append('null')
-        
+                
         #this goes through each day, determines the standard deviation of
         #paired et measurements, and uses this value to determine random error
         #for that day
@@ -262,7 +271,6 @@ class flux_reader:
         #all the days in the study period, sorted
         study_days = [day for day in self.et_dict]
         study_days.sort()
-        
         #this dictionary will contain keys that correspond to the percentage
         #of gaps filled, while the values will be lists of the corresponding error
         #for each day that was tested
@@ -274,9 +282,12 @@ class flux_reader:
         for i in range(0, len(study_days)):
             #list of real measurements for day in question
             measurements = self.et_dict[study_days[i]]['real measurements']
-            if "null" not in measurements:
+            #does not do this on days that are at the edge of the study period, as they don't have 
+            #a four day window to compare with
+            if "null" not in measurements and i not in [0, 1, len(study_days), len(study_days)-1, len(study_days) - 2]:
                 #these will contains artifical data sets where 12.5%, 25% etc.
                 #of the gaps are filled in from the surrounding days
+                
                 i125 = []
                 i25 = []
                 i50 = []
@@ -293,62 +304,68 @@ class flux_reader:
                 window = [measurements_neg_2, measurements_neg_1, measurements_1, 
                           measurements_2]
                 
-                #goes through each half hour measurement in order
-                for x in range(0, len(measurements)):
-                    #the four values of ET measured at the same time on the adjacent days
-                    #only adds values that aren't "null"
-                    adjacent_days = [day[x] for day in window if type(day[x]) != str]
-                    
-                    if len(adjacent_days) < 2:
-                        #the script will not use any days that have a null fill value to 
-                        #determine error
-                        window_avg = 'null'
-                    else:
-                        #the value that will be used to fill artificial gaps
-                        window_avg = sum(adjacent_days)/len(adjacent_days)
-                    
-                    #fills the lists with a certain percentage of evenly spaced gap-fills                  
-                    if x % 8 == 0:
-                        i125.append(window_avg)
-                        i875.append(measurements[x])
-                    else:
-                        i875.append(window_avg)
-                        i125.append(measurements[x])
-                    
-                    if x % 4 == 0:
-                        i75.append(measurements[x])
-                        i25.append(window_avg)
-                    else:
-                        i25.append(measurements[x])
-                        i75.append(window_avg)
-                        
-                    if x % 2 == 0:
-                        i50.append(measurements[x])
-                    else:
-                        i50.append(window_avg)
+                #there is a pesky day in one of the files that is somehow not getting an array
+                #of length 48 for 'real measurements'
+                if sum([len(i) for i in window]) != (48*4):
+                    pass
                 
-                #determine what percent error there is on the artificial data 
-                #when compared to the real data. this is a real mess and should be fixed
-                if "null" not in i125:
-                    #if abs(1 - sum(i125)/sum(measurements)) < 10: 
-                        self.gap_error[12.5].append(abs(1 - sum(i125)/sum(measurements)))
-                if "null" not in i25:
-                    #if abs(1 - sum(i25)/sum(measurements)) < 20: 
-                        self.gap_error[25].append(abs(1 - sum(i25)/sum(measurements)))
-                if "null" not in i50:
-                    #if abs(1 - sum(i50)/sum(measurements)) < 40: 
-                        self.gap_error[50].append(abs(1 - sum(i50)/sum(measurements)))
-                if "null" not in i75:
-                    #if abs(1 - sum(i75)/sum(measurements)) < 50: 
-                        self.gap_error[75].append(abs(1 - sum(i75)/sum(measurements)))
-                if "null" not in i875:
-                    #if abs(1 - sum(i875)/sum(measurements)) < 50: 
-                        self.gap_error[87.5].append(abs(1 - sum(i875)/sum(measurements)))
+                else:
+                    #goes through each half hour measurement in order
+                    for x in range(0, len(measurements)):
+                        #the four values of ET measured at the same time on the adjacent days
+                        #only adds values that aren't "null"
+                        
+                        adjacent_days = [day[x] for day in window if type(day[x]) != str]
+                        
+                        if len(adjacent_days) < 2:
+                            #the script will not use any days that have a null fill value to 
+                            #determine error
+                            window_avg = 'null'
+                        else:
+                            #the value that will be used to fill artificial gaps
+                            window_avg = sum(adjacent_days)/len(adjacent_days)
+                        
+                        #fills the lists with a certain percentage of evenly spaced gap-fills                  
+                        if x % 8 == 0:
+                            i125.append(window_avg)
+                            i875.append(measurements[x])
+                        else:
+                            i875.append(window_avg)
+                            i125.append(measurements[x])
+                        
+                        if x % 4 == 0:
+                            i75.append(measurements[x])
+                            i25.append(window_avg)
+                        else:
+                            i25.append(measurements[x])
+                            i75.append(window_avg)
+                            
+                        if x % 2 == 0:
+                            i50.append(measurements[x])
+                        else:
+                            i50.append(window_avg)
+                    
+                    #determine what percent error there is on the artificial data 
+                    #when compared to the real data. this is a real mess and should be fixed
+                    if "null" not in i125:
+                        #if abs(1 - sum(i125)/sum(measurements)) < 10: 
+                            self.gap_error[12.5].append(abs(1 - sum(i125)/sum(measurements)))
+                    if "null" not in i25:
+                        #if abs(1 - sum(i25)/sum(measurements)) < 20: 
+                            self.gap_error[25].append(abs(1 - sum(i25)/sum(measurements)))
+                    if "null" not in i50:
+                        #if abs(1 - sum(i50)/sum(measurements)) < 40: 
+                            self.gap_error[50].append(abs(1 - sum(i50)/sum(measurements)))
+                    if "null" not in i75:
+                        #if abs(1 - sum(i75)/sum(measurements)) < 50: 
+                            self.gap_error[75].append(abs(1 - sum(i75)/sum(measurements)))
+                    if "null" not in i875:
+                        #if abs(1 - sum(i875)/sum(measurements)) < 50: 
+                            self.gap_error[87.5].append(abs(1 - sum(i875)/sum(measurements)))
         
         #will contain the x/y data for percent gaps, percent error
         percent_gaps = []
         errors = []
-        
         for i in [.125, .25, .50, .75, .875]:
             for x in self.gap_error[i*100]:
                 values = np.array(self.gap_error[i*100])
@@ -356,8 +373,7 @@ class flux_reader:
                 if x < np.percentile(values, 95):
                     percent_gaps.append(i)
                     errors.append(x)
-       
-        
+                
         self.gap_slope, self.gap_intercept, r_value, p_value, std_err = scipy.stats.linregress(percent_gaps, errors)
             
         percent_gaps = np.array(percent_gaps)
@@ -366,22 +382,26 @@ class flux_reader:
         percent_gaps *= 100
         errors *= 100
         
+        #commented out because this plot isn't terribly useful
+        
         #scatter plot of points
-        plt.scatter(percent_gaps, errors, color = '#e41a1c',
-                    zorder = 4, edgecolors = 'black')
-        #linreg relationship between percent gaps, percent error
-        line = self.gap_slope * percent_gaps + self.gap_intercept
+        # plt.scatter(percent_gaps, errors, color = '#e41a1c',
+        #             zorder = 4, edgecolors = 'black')
+        # #linreg relationship between percent gaps, percent error
+        # line = self.gap_slope * percent_gaps + self.gap_intercept
         
-        plt.title("Relationship between % Gaps Filled, % Error at {}".format(self.tower))
-        plt.xlabel("Percentage of gaps created and filled in artificial datasets")
-        plt.ylabel("Percent error")
-        plt.plot(percent_gaps, line, 'r', zorder = 5, 
-                 label='y = {:.2f}x + {:.2f}, R$^2$ = {:.2f}'.format(self.gap_slope, self.gap_intercept, r_value ** 2), 
-                 color = '#fb9a99', linewidth = 2.5)
-        plt.legend()
+        # plt.title("Relationship between % Gaps Filled, % Error at {}".format(self.tower))
+        # plt.xlabel("Percentage of gaps created and filled in artificial datasets")
+        # plt.ylabel("Percent error")
+        # plt.plot(percent_gaps, line, 'r', zorder = 5, 
+        #          label='y = {:.2f}x + {:.2f}, R$^2$ = {:.2f}'.format(self.gap_slope, self.gap_intercept, r_value ** 2), 
+        #          color = '#fb9a99', linewidth = 2.5)
+        # plt.legend()
         
-        plt.savefig(r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\figures\{}_gap_error.png'.format(self.tower), dpi = 350)
-        plt.show()
+        # plt.savefig(r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\figures\gap_error\{}_gap_error.png'.format(self.tower), dpi = 350)
+        # plt.show()
+        
+        
         #goes through et_dict and applies equation to determine percent error on
         #gap-filled days
         for day in self.et_dict:
@@ -394,6 +414,7 @@ class flux_reader:
                 self.et_dict[day]['gap error in mm'] = 0
             
         return self.et_dict
+        
     
     '''
     this function can only be called after et_by_day has been called
@@ -437,12 +458,14 @@ class flux_reader:
                         #convert to julian day
                         jd = datetime.strptime(str(day), '%Y%j')
                         jd = datetime.strftime(jd, '%Y%j')
-                        #a day needs all 48 measurements filled to be valid
-                        if self.et_dict[jd]['measurements'] == 48:
-                            et_counter += self.et_dict[jd]['et']
-                            days_counter += 1
-                            #dependent errors, propagated in quadrature
-                            error_counter += (self.et_dict[jd]['gap error in mm']**2 + self.et_dict[jd]['random error']**2)**0.5
+                        
+                        if jd in self.et_dict:
+                            #a day needs all 48 measurements filled to be valid
+                            if self.et_dict[jd]['measurements'] == 48:
+                                et_counter += self.et_dict[jd]['et']
+                                days_counter += 1
+                                #dependent errors, propagated in quadrature
+                                error_counter += (self.et_dict[jd]['gap error in mm']**2 + self.et_dict[jd]['random error']**2)**0.5
                 #need at least five days with all 48 measurements filled in
                 if days_counter > 4:
                     et_averaged = (et_counter * 8) / days_counter
@@ -450,7 +473,6 @@ class flux_reader:
                     self.flux_et[i] = et_averaged, error_percent
             
                 self.measurement_dict[i] = days_counter
-            
         return self.flux_et
     
     '''
@@ -461,55 +483,50 @@ class flux_reader:
     the julian day (YYYYDDD) and the value is ET. 
     years should be a list of years
     '''
-    def linreg_et_plot(self, mod16_et, years):
-        #self.flux_et = flux_et
+    def linreg_et_plot(self, mod16_et):
+
         self.mod16_et = mod16_et
-        self.years = years
 
         flux_keys = [key for key in self.flux_et]
         flux_keys.sort()
         
+        
         flux_et_sorted = []
         modis_et_sorted = []
+        
         #error is calculated using gap-filled error percentages 
         error_sorted = [abs(self.flux_et[i][1]) for i in flux_keys]
 
         for key in flux_keys:
             flux_et_sorted.append(self.flux_et[key][0])
             modis_et_sorted.append(self.mod16_et[key])
-            
 
-        slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(flux_et_sorted, modis_et_sorted)
-        modis_et_sorted = np.array(modis_et_sorted)
-        flux_et_sorted = np.array(flux_et_sorted)
-        error_sorted = np.array(error_sorted)
+        slope, intercept, r_value, self.p_value_8day, std_err = scipy.stats.linregress(flux_et_sorted, modis_et_sorted)
+        
+        #making these accessible outside of the function so that
+        #points can be aggregated for east and west
+        self.modis_et_sorted = np.array(modis_et_sorted)
+        self.flux_et_sorted = np.array(flux_et_sorted)
+        self.error_sorted = np.array(error_sorted)
 
         plt.style.use('seaborn-darkgrid')
 
         #scatter plot of points
-        plt.scatter(flux_et_sorted, modis_et_sorted, color = '#31a354',
+        plt.scatter(self.flux_et_sorted, self.modis_et_sorted, color = '#008837',
                     zorder = 4, edgecolors = 'black')
                     
         #error bars
-        plt.errorbar(flux_et_sorted, modis_et_sorted, 
-                     #error equation: error is a function of 2008's error, flux tower measurement
-                     #xerr = flux_et_sorted * self.year_dict['2008']['error'], 
-                     xerr = flux_et_sorted * error_sorted,
+        plt.errorbar(self.flux_et_sorted, self.modis_et_sorted, 
+                     #error equation: error is a function gap filling error, random error, flux et
+                     xerr = flux_et_sorted * self.error_sorted,
                      linewidth = 0, elinewidth = 1, ecolor = 'black',
                      capsize = 2, zorder = 3)
-
-        #extend linreg line
-        flux_et_sorted = np.append(flux_et_sorted, 0)
-        flux_et_sorted = np.append(flux_et_sorted, 40)
-
-        plt.xlim(-1, 34.5)
-        plt.ylim(0, 33)
         
         #lin regression line
-        line = slope * flux_et_sorted + intercept
-        plt.plot(flux_et_sorted, line, 'r', zorder = 5, 
+        line = slope * self.flux_et_sorted + intercept
+        plt.plot(self.flux_et_sorted, line, 'r', zorder = 5, 
                  label='y = {:.2f}x + {:.2f}, R$^2$ = {:.2f}'.format(slope, intercept, r_value ** 2), 
-                 color = '#984ea3', linewidth = 2.5)
+                 color = '#7b3294', linewidth = 2.5)
 
         
         plt.xlabel('Flux tower ET measurement in mm')
@@ -517,101 +534,86 @@ class flux_reader:
         plt.title('Comparison of 8-Day ET at {} Flux Tower'.format(self.tower))
 
         plt.legend()
-        plt.savefig(r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\figures\{}_linreg2.png'.format(self.tower), dpi = 350)
-    
-    
+        plt.savefig(r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\figures\linreg\{}_linreg.png'.format(self.tower), dpi = 350)
+        plt.show()
+        print(self.p_value_8day)
     '''
     groups the assessesd 8-day periods by year and then does linear regression.
     can only be called after et_by_day.
     both flux_et and mod16_et should be dictionaries where the key is
     the julian day (YYYYDDD) and the value is ET. 
     years should be a list of years.
-    i don't like this analysis because the amount of 8-day periods a flux
-    tower has records for changes by year
+    makes a linreg of 8 day modis et compared to flux tower et for a single year
     '''
-    def annual_et_linreg(self, mod16_et, years):
-        self.years = years
+    def annual_et_linreg(self, mod16_et, year, make_plot = False):
+        self.year = year
         self.mod16_et = mod16_et
         
         
         flux_keys = [key for key in self.flux_et]
         flux_keys.sort()
         
-        yearly_flux_et = []
-        yearly_mod_et = []
+        flux_et = []
+        mod_et = []
         
-        error_sorted = []
-        
-        #goes through each year to determine annual flux et, mod16 et, error
-        for year in years:
-            
-            flux_et = 0
-            mod_et = 0
-            error = 0
-            
-            for key in flux_keys:
-                if key[0:4] == str(year):
-                    flux_et += self.flux_et[key][0]
-                    mod_et += self.mod16_et[key]
-                    #error == et * percent error
-                    error += self.flux_et[key][0] * abs(self.flux_et[key][1])
-            
-            yearly_flux_et.append(flux_et)
-            yearly_mod_et.append(mod_et)
-            #error is ET error in mm / ET
-            error_sorted.append(error/flux_et)
-        
+        error = []
+        #check 8 day periods for given year
+        for key in flux_keys:
+            if key[0:4] == str(self.year):
+
+                flux_et.append(self.flux_et[key][0])
+                mod_et.append(self.mod16_et[key])
+                #error == et * percent error
+                error.append(self.flux_et[key][0] * abs(self.flux_et[key][1]))
+
         #stats
-        slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(yearly_flux_et, yearly_mod_et)
+        #year_slope and year_intercept are declared so that they can be accessed and 
+        #plotted later
+        year_slope, year_intercept, r_value, p_value, std_err = scipy.stats.linregress(flux_et, mod_et)
         
         #turn lists to np arrays
-        yearly_flux_et = np.array(yearly_flux_et)
-        yearly_mod_et = np.array(yearly_mod_et)
-        error_sorted = np.array(error_sorted)
+        flux_et = np.array(flux_et)
+        mod_et = np.array(mod_et)
+        error = np.array(error)
         
-        plt.xlim(205, 390)
-        plt.ylim(295, 410)
-        
-        
-        plt.style.use('seaborn-darkgrid')
-        
-        #scatter plot of points
-        plt.scatter(yearly_flux_et, yearly_mod_et, color = '#31a354',
-                    zorder = 4, edgecolors = 'black')
-
-        #error bars
-        plt.errorbar(yearly_flux_et, yearly_mod_et, 
-                     xerr = yearly_flux_et * error_sorted,
-                     linewidth = 0, elinewidth = 1, ecolor = 'black',
-                     capsize = 2, zorder = 3)
+        if make_plot == True:
+            plt.style.use('seaborn-darkgrid')
+            
+            #scatter plot of points
+            plt.scatter(flux_et, mod_et, color = '#008837',
+                        zorder = 4, edgecolors = 'black')
     
+            #error bars
+            plt.errorbar(flux_et, mod_et, 
+                         xerr = error,
+                         linewidth = 0, elinewidth = 1, ecolor = 'black',
+                         capsize = 2, zorder = 3)
+        
+        
+            
+            #lin regression line
+            line = year_slope * flux_et + year_intercept
+            plt.plot(flux_et, line, 'r', zorder = 5, 
+                     label='y = {:.2f}x + {:.2f}, R$^2$ = {:.2f}'.format(year_slope, year_intercept, r_value ** 2), 
+                     color = '#7b3294', linewidth = 2.5)
+                     
+            plt.xlabel('Flux tower ET measurement in mm')
+            plt.ylabel('MOD16 estimated ET in mm')
+            plt.title('Comparison of {} ET at {} Flux Tower'.format(self.year, self.tower))
     
-        #extends linreg line
-        np_flux_et = np.append(yearly_flux_et, 0)
-        np_flux_et = np.append(np_flux_et, 500)
-        
-        #lin regression line
-        line = slope * np_flux_et + intercept
-        plt.plot(np_flux_et, line, 'r', zorder = 5, 
-                 label='y = {:.2f}x + {:.2f}, R$^2$ = {:.2f}'.format(slope, intercept, r_value ** 2), 
-                 color = '#984ea3', linewidth = 2.5)
-                 
-        plt.xlabel('Flux tower ET measurement in mm')
-        plt.ylabel('MOD16 estimated ET in mm')
-        plt.title('Comparison of Annual ET at {} Flux Tower'.format(self.tower))
-
-        plt.legend()
-        plt.savefig(r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\figures\{}_linreg_annual.png'.format(self.tower), dpi = 350)
-        
-        return yearly_flux_et, yearly_mod_et
+            plt.legend()
+            plt.savefig(r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\figures\{}_linreg_{}.png'.format(self.tower, self.year), dpi = 350)
+            plt.show()
+        return year_slope, year_intercept
         
     '''
     make a time series plot of flux data vs. modis data
     year should just be one year (may change this)
     '''
-    def time_series_plot(self, flux_et, mod16_et, year):
+    def time_series_plot(self, flux_et, mod16_et, ppt_data, year):
         self.flux_et = flux_et
         self.mod16_et = mod16_et
+        self.ppt_data = ppt_data
         
         #sorts the data in chronological order
         flux_keys = [key for key in self.flux_et]
@@ -619,9 +621,14 @@ class flux_reader:
         mod_keys = [key for key in self.mod16_et]
         mod_keys.sort()
         
+        if ppt_data is not None:
+            ppt_keys = [key for key in self.ppt_data]
+        
         flux_et_sorted = np.array([])
         modis_et_sorted = np.array([])
-
+        
+        if ppt_data is not None:
+            ppt_sorted = np.array([])
         
         for key in mod_keys:
             if key[0:4] == str(year):
@@ -630,17 +637,27 @@ class flux_reader:
                     flux_et_sorted = np.append(flux_et_sorted, self.flux_et[key][0])
                 else:
                     flux_et_sorted = np.append(flux_et_sorted, np.nan)
+                if key in ppt_keys:
+                    ppt_sorted = np.append(ppt_sorted, self.ppt_data[key]['ppt in mm'])
+                else:
+                    ppt_sorted = np.append(ppt_sorted, np.nan)
+
         
         #gets rid of jd 361, which has no flux value associated
         #modis_et_sorted = modis_et_sorted[0:-1]
         plt.style.use('seaborn-darkgrid')
         
         julian_days = [i for i in range(1, 365, 8)]
+        
+        if self.ppt_data is not None:
+            #ppt data graph
+            plt.bar(julian_days, ppt_sorted, color = '#984ea3', zorder = 1, width = 1.6)
+        
         #time series plots
-        plt.plot(julian_days, flux_et_sorted, color = "#4daf4a", zorder = 1)
-        plt.plot(julian_days, modis_et_sorted, color = "#377eb8", zorder = 1)
-        plt.scatter(julian_days, flux_et_sorted, color = "#4daf4a", s = 10, zorder = 3)
-        plt.scatter(julian_days, modis_et_sorted, color = "#377eb8", s = 10, zorder = 3)
+        plt.plot(julian_days, flux_et_sorted, color = "#74a9cf", zorder = 2)
+        plt.plot(julian_days, modis_et_sorted, color = "#045a8d", zorder = 2)
+        plt.scatter(julian_days, flux_et_sorted, color = "#74a9cf", s = 10, zorder = 3)
+        plt.scatter(julian_days, modis_et_sorted, color = "#045a8d", s = 10, zorder = 3)
                   
         #error is calculated as gap-filling error
         error_sorted = np.array([])
@@ -660,17 +677,106 @@ class flux_reader:
                      linewidth = 0, elinewidth = 1, ecolor = "black", capsize = 2,
                      zorder = 2)
         
-        green = matplotlib.patches.Patch(color = '#4daf4a', label = 'Flux tower ET')
-        blue = matplotlib.patches.Patch(color = '#377eb8', label = 'MOD16 estimations')
+        blue = matplotlib.patches.Patch(color = '#74a9cf', label = 'Flux tower ET')
+        dark_blue = matplotlib.patches.Patch(color = '#045a8d', label = 'MOD16 estimations')
+        purp = matplotlib.patches.Patch(color = '#984ea3', label = 'Precipitation')
         
         plt.xticks([i for i in range (1, 356, 24)], [i for i in range (1, 356, 24)])
         plt.xlabel("Julian day that 8-day period began")
         plt.ylabel("ET in mm for 8-day period")
         plt.title("{} Time Series of MOD16 and Flux Tower ET at {}".format(year, self.tower))
         
-        plt.legend(handles = [green, blue])
+        plt.legend(handles = [blue, dark_blue, purp])
         
-        plt.savefig(r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\figures\{}_{}_time_Series.png'.format(self.tower, year), dpi = 350)
+        plt.savefig(r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\figures\time_series\{}_{}_time_Series.png'.format(self.tower, year), dpi = 350)
+    
+    '''
+    function that compares ppt to evapotranspiration measures via linear regression
+    '''
+    def ppt_et_linreg(self, mod16_et, ppt_data):
+        
+        #we're only considering 8 day periods that aren't missing precipitation data
+        self.ppt_keys = [i for i in ppt_data if ppt_data[i]['missing days'] == 0]
+        self.ppt_keys.sort()
+        
+        ppt_sorted = []
+        flux_et_sorted = []
+        modis_et_sorted = []
+        
+        #error is calculated using gap-filled error percentages 
+        flux_error_sorted = [abs(self.flux_et[i][1]) for i in self.ppt_keys if i in self.flux_et]
+
+        for key in self.ppt_keys:
+            #8 day period needs valid data from 
+            if key in self.flux_et:
+                flux_et_sorted.append(self.flux_et[key][0])
+                modis_et_sorted.append(mod16_et[key])
+                ppt_sorted.append(ppt_data[key]['ppt in mm'])
+        
+        #added ppt as an addendum bc these arrays have less data since they are constricted
+        #to 8 day periods during which ppt isn't missing data
+        self.modis_et_sorted_ppt = np.array(modis_et_sorted)
+        self.flux_et_sorted_ppt = np.array(flux_et_sorted)
+        self.flux_error_sorted_ppt = np.array(flux_error_sorted)
+        self.ppt_sorted = np.array(ppt_sorted)
+        
+        #data for linreg that compares flux et to ppt
+        slope, intercept, r_value, p_value_8day, std_err = scipy.stats.linregress(flux_et_sorted, ppt_sorted)
+        
+        #making these accessible outside of the function so that
+        #points can be aggregated for east and west
+        
+
+        plt.style.use('seaborn-darkgrid')
+
+        #scatter plot of points
+        plt.scatter(self.flux_et_sorted_ppt, self.ppt_sorted, color = '#74a9cf',
+                    zorder = 4, edgecolors = 'black')
+                    
+        #error bars
+        plt.errorbar(self.flux_et_sorted_ppt, self.ppt_sorted, 
+                     #error equation: error is a function gap filling error, random error, flux et
+                     xerr = self.flux_et_sorted_ppt * self.flux_error_sorted_ppt,
+                     linewidth = 0, elinewidth = 1, ecolor = 'black',
+                     capsize = 2, zorder = 3)
+        
+        #lin regression line
+        line = slope * self.flux_et_sorted_ppt + intercept
+        plt.plot(self.flux_et_sorted_ppt, line, 'r', zorder = 5, 
+                 label='y = {:.2f}x + {:.2f}, R$^2$ = {:.2f}'.format(slope, intercept, r_value ** 2), 
+                 color = '#984ea3', linewidth = 2.5)
+
+        
+        plt.xlabel('Flux tower ET measurement in mm')
+        plt.ylabel('Precipitation in mm')
+        plt.title('Comparison of Flux Tower ET and Precipitation at {} Flux Tower'.format(self.tower))
+
+        plt.legend()
+        plt.savefig(r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\figures\linreg\{}_flux_ppt_linreg.png'.format(self.tower), dpi = 350)
+        plt.show()
+        
+        #data for linreg that compares modis et to ppt
+        slope, intercept, r_value, p_value_8day, std_err = scipy.stats.linregress(modis_et_sorted, ppt_sorted)
+        #scatter plot of points
+        plt.scatter(self.modis_et_sorted_ppt, self.ppt_sorted, color = '#045a8d',
+                    zorder = 4, edgecolors = 'black')
+
+        #lin regression line
+        line = slope * self.modis_et_sorted_ppt + intercept
+        plt.plot(self.modis_et_sorted_ppt, line, 'r', zorder = 5, 
+                 label='y = {:.2f}x + {:.2f}, R$^2$ = {:.2f}'.format(slope, intercept, r_value ** 2), 
+                 color = '#984ea3', linewidth = 2.5)
+
+        
+        plt.xlabel('MOD16 ET estimation in mm')
+        plt.ylabel('Precipitation in mm')
+        plt.title('Comparison of MOD16 ET and Precipitation at {} Flux Tower'.format(self.tower))
+
+        plt.legend()
+        plt.savefig(r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\figures\linreg\{}_mod16_ppt_linreg.png'.format(self.tower), dpi = 350)
+        plt.show()
+                
+    
     '''
     this function takes a string that represents a year as an input
     it returns a linear regression graph of LE + H vs. Rn - H
@@ -733,21 +839,18 @@ class flux_reader:
     false, the default, calculates rmse for 8-day periods
     true calculates it on a yearly scale
     '''
-    def rmse(self, flux_et, mod16_et, annual = False):
-        
-        flux_et = flux_et
-        mod16_et = mod16_et
+    def rmse(self, mod16_et, annual = False):
         
         difference = 0
         counter = 0
         
         if annual == False:
-            for key in flux_et:
-                difference += (flux_et[key][0] - mod16_et[key])**2
+            for key in self.flux_et:
+                difference += (self.flux_et[key][0] - mod16_et[key])**2
                 counter += 1
         else: 
-            for i in flux_et:
-                difference += (flux_et[counter] - mod16_et[counter])**2
+            for i in self.flux_et:
+                difference += (self.flux_et[counter] - mod16_et[counter])**2
                 counter += 1
         
         self.root_mse = (difference/counter)**0.5
@@ -759,11 +862,8 @@ class flux_reader:
     false, the default, calculates bias for 8-day periods
     true calculates it on a yearly scale
     '''
-    def bias(self, flux_et, mod16_et, annual = False):
-        
-        flux_et = flux_et
-        mod16_et = mod16_et
-        
+    def bias(self, mod16_et, annual = False):
+
         #flux tower et, in mm
         fet = 0
         #difference between MOD16 and flux et 
@@ -772,16 +872,16 @@ class flux_reader:
         counter = 0
         
         if annual == False:
-            for key in flux_et:
+            for key in self.flux_et:
                 #eq for bias
-                difference += (mod16_et[key] - flux_et[key][0])
+                difference += (mod16_et[key] - self.flux_et[key][0])
                 counter += 1
-                fet += flux_et[key][0]
+                fet += self.flux_et[key][0]
         else:
-            for i in range(0, len(flux_et)):
-                difference += (mod16_et[i] - flux_et[i])
+            for i in range(0, len(self.flux_et)):
+                difference += (mod16_et[i] - self.flux_et[i])
                 counter += 1
-                fet += flux_et[i]
+                fet += self.flux_et[i]
         
         self.bias_calc = difference/counter
         #eq for pbias
@@ -810,7 +910,10 @@ class flux_reader:
                 fileobj.write("{}, {},".format(self.flux_et[i][0], error))
             else:
                 fileobj.write(",,")
-            fileobj.write('{}\n'.format(self.measurement_dict[i]))
+            if i in self.measurement_dict:
+                fileobj.write('{}\n'.format(self.measurement_dict[i]))
+            else:
+                fileobj.write('\n')
         fileobj.close()
     
     '''
@@ -833,6 +936,80 @@ class flux_reader:
             counter += 1
     
         fileobj.close()
+
+class ppt_reader:
+    
+    def __init__(self, infile):
+        self.infile = infile
+        fileobj = open(self.infile, 'r')
+        self.content = fileobj.readlines()
+        self.content = self.content[1:]
+        fileobj.close()
+    
+    #this function creates a dictionary where ppt is summed up over 8 day 
+    #periods
+    @property
+    def eight_day_ppt(self):
+        
+        counter = 0
+        eight_day_ppt_dict = {}
+        
+
+        for i in self.content:     
+            
+            date = i.split(",")[0]
+            
+            #when ppt = '' there is a missing value
+            ppt = i.split(",")[19]
+            if ppt != '':
+                ppt = float(ppt)
+
+            
+            #turns date into a datetime object so that it can be converted to julian
+            dt = datetime.strptime(date, '%m/%d/%Y')
+            #converts to julian day which is a lot better than yyyymmdd
+            date = str(datetime.strftime(dt, '%Y%j'))
+
+            #create new dictionary key for each 8 day period
+            if counter % 8 == 0:
+                
+                eight_day_ppt_dict[date] = {'ppt in mm': 0, 'missing days': 0}
+                
+                if ppt != '':
+                    eight_day_ppt_dict[date]['ppt in mm'] = ppt
+                elif ppt == '':
+                    eight_day_ppt_dict[date]['missing days'] += 1
+            else:    
+                
+                if ppt != '':
+                    #matching this ppt value to the correct key
+                    eight_day_ppt_dict[str(int(date) - (counter % 8))]['ppt in mm'] += ppt
+                elif ppt == '':
+                    eight_day_ppt_dict[str(int(date) - (counter % 8))]['missing days'] += 1
+             
+            #the counter needs to be reset each year because 365 % 8 != 0
+            #i am indexing the days as Jan 1 == 0 on the counter
+            if counter >= 364:
+                #checks for leap year
+                if counter == 364 and int(date[0:4]) % 4 == 0:
+                    counter += 1
+                else: 
+                    counter = 0
+            elif counter < 364:
+                counter += 1
+        
+        self.eight_day_ppt_dict = eight_day_ppt_dict
+        return self.eight_day_ppt_dict
+    
+    @property
+    def ordered_ppt(self):
+        
+        eight_day_periods = [i for i in self.eight_day_ppt_dict]
+        eight_day_periods.sort()
+        
+        ppt_values = [self.eight_day_ppt_dict[i]['ppt in mm'] for i in eight_day_periods]
+        
+        return eight_day_periods, ppt_values
 
 class download_modis:
     '''
