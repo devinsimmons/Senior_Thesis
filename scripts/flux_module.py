@@ -214,7 +214,7 @@ class flux_reader:
                     le2 = float(day[11])
                     ta2 = float(day[3]) 
                     ws2 = float(day[6]) 
-                    ppfd2 = float(day[26]) - float(day[29])
+                    ppfd2 = float(day[25]) - float(day[28])
                     #check if comparison of le can be made
                     #the environmental conditions need to be nearly identical
                     if le2 != -9999 and (abs(ta - ta2) < 3) and (abs(ppfd - ppfd2) < 75) and (abs(ws - ws2) < 1):
@@ -536,7 +536,6 @@ class flux_reader:
         plt.legend()
         plt.savefig(r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\figures\linreg\{}_linreg.png'.format(self.tower), dpi = 350)
         plt.show()
-        print(self.p_value_8day)
     '''
     groups the assessesd 8-day periods by year and then does linear regression.
     can only be called after et_by_day.
@@ -839,30 +838,66 @@ class flux_reader:
     false, the default, calculates rmse for 8-day periods
     true calculates it on a yearly scale
     '''
-    def rmse(self, mod16_et, annual = False):
+    def rmse(self, mod16_et, seasonal = False):
         
         difference = 0
         counter = 0
         
-        if annual == False:
+        if seasonal == False:
             for key in self.flux_et:
                 difference += (self.flux_et[key][0] - mod16_et[key])**2
                 counter += 1
-        else: 
-            for i in self.flux_et:
-                difference += (self.flux_et[counter] - mod16_et[counter])**2
-                counter += 1
+            self.root_mse = (difference/counter)**0.5
+            return self.root_mse
         
-        self.root_mse = (difference/counter)**0.5
-        return self.root_mse
+        else: 
+            
+            #difference between mod16, flux et
+            spring_dif = 0
+            summer_dif = 0
+            fall_dif = 0
+            wint_dif = 0
+            
+            #counters
+            spring_ct = 0
+            summer_ct = 0
+            fall_ct = 0
+            wint_ct = 0
+            
+            for key in self.flux_et:
+                #determines season based on julian day. special cases for leap years
+                #seasons are meteorological seasons
+                if (int(key[-3:]) in range(61, 153) and int(key[0:4]) % 4 == 0) or (int(key[-3:]) in range(60, 152) and int(key[0:4]) % 4 != 0):
+                    spring_dif += (mod16_et[key] - self.flux_et[key][0]) ** 2
+                    spring_ct += 1
+                
+                elif (int(key[-3:]) in range(153, 245) and int(key[0:4]) % 4 == 0) or (int(key[-3:]) in range(152, 244) and int(key[0:4]) % 4 != 0):
+                    summer_dif += (mod16_et[key] - self.flux_et[key][0]) ** 2
+                    summer_ct += 1
+                
+                elif (int(key[-3:]) in range(245, 336) and int(key[0:4]) % 4 == 0) or (int(key[-3:]) in range(244, 335) and int(key[0:4]) % 4 != 0):
+                    fall_dif += (mod16_et[key] - self.flux_et[key][0]) ** 2
+                    fall_ct += 1
+                
+                else: 
+                    wint_dif += (mod16_et[key] - self.flux_et[key][0]) **2 
+                    wint_ct += 1
+            
+            self.spring_rmse = (spring_dif/spring_ct) ** 0.5
+            self.summer_rmse = (summer_dif/summer_ct) ** 0.5
+            self.fall_rmse = (fall_dif/fall_ct) ** 0.5
+            self.wint_rmse = (wint_dif/wint_ct) ** 0.5
+            
+            return self.spring_rmse, self.summer_rmse, self.fall_rmse, self.wint_rmse
+        
     
     '''
     determines bias and percent bias of MOD16 relative to flux tower data
-    annual should be a boolean value.
-    false, the default, calculates bias for 8-day periods
-    true calculates it on a yearly scale
+    seasonal should be a boolean value.
+    false, the default, calculates bias for all 8-day periods
+    true calculates it for all four seasons
     '''
-    def bias(self, mod16_et, annual = False):
+    def bias(self, mod16_et, seasonal = False):
 
         #flux tower et, in mm
         fet = 0
@@ -871,23 +906,75 @@ class flux_reader:
         #number of comparisons, or N 
         counter = 0
         
-        if annual == False:
+        if seasonal == False:
             for key in self.flux_et:
                 #eq for bias
                 difference += (mod16_et[key] - self.flux_et[key][0])
                 counter += 1
                 fet += self.flux_et[key][0]
+            self.bias_calc = difference/counter
+            #eq for pbias
+            self.percent_bias = 100 * self.bias_calc/((1/counter)*fet)
+            
+            return self.bias_calc, self.percent_bias
+            
         else:
-            for i in range(0, len(self.flux_et)):
-                difference += (mod16_et[i] - self.flux_et[i])
-                counter += 1
-                fet += self.flux_et[i]
-        
-        self.bias_calc = difference/counter
-        #eq for pbias
-        self.percent_bias = 100 * self.bias_calc/((1/counter)*fet)
-        
-        return self.bias_calc, self.percent_bias
+            #flux tower et in mm
+            spring_fet = 0
+            summer_fet = 0
+            fall_fet = 0
+            wint_fet = 0
+            
+            #difference between mod16, flux et
+            spring_dif = 0
+            summer_dif = 0
+            fall_dif = 0
+            wint_dif = 0
+            
+            #counters
+            spring_ct = 0
+            summer_ct = 0
+            fall_ct = 0
+            wint_ct = 0
+            
+            
+            for key in self.flux_et:
+                #determines season based on julian day. special cases for leap years
+                #seasons are meteorological seasons
+                if (int(key[-3:]) in range(61, 153) and int(key[0:4]) % 4 == 0) or (int(key[-3:]) in range(60, 152) and int(key[0:4]) % 4 != 0):
+                    spring_dif += (mod16_et[key] - self.flux_et[key][0])
+                    spring_ct += 1
+                    spring_fet += self.flux_et[key][0]
+                
+                elif (int(key[-3:]) in range(153, 245) and int(key[0:4]) % 4 == 0) or (int(key[-3:]) in range(152, 244) and int(key[0:4]) % 4 != 0):
+                    summer_dif += (mod16_et[key] - self.flux_et[key][0])
+                    summer_ct += 1
+                    summer_fet += self.flux_et[key][0]
+                
+                elif (int(key[-3:]) in range(245, 336) and int(key[0:4]) % 4 == 0) or (int(key[-3:]) in range(244, 335) and int(key[0:4]) % 4 != 0):
+                    fall_dif += (mod16_et[key] - self.flux_et[key][0])
+                    fall_ct += 1
+                    fall_fet += self.flux_et[key][0]
+                
+                else: 
+                    wint_dif += (mod16_et[key] - self.flux_et[key][0])
+                    wint_ct += 1
+                    wint_fet += self.flux_et[key][0]
+                
+            self.spring_bias = spring_dif/spring_ct
+            self.spring_pbias = 100 * self.spring_bias/((1/spring_ct) * spring_fet)
+                
+            self.summer_bias = summer_dif/summer_ct
+            self.summer_pbias = 100 * self.summer_bias/((1/summer_ct) * summer_fet)
+                
+            self.wint_bias = wint_dif/wint_ct
+            self.wint_pbias = 100 * self.wint_bias/((1/wint_ct) * wint_fet)
+                
+            self.fall_bias = fall_dif/fall_ct
+            self.fall_pbias = 100 * self.fall_bias/((1/fall_ct) * fall_fet)
+
+                
+            return self.spring_bias, self.spring_pbias, self.summer_bias, self.summer_pbias, self.fall_bias, self.fall_pbias, self.wint_bias, self.wint_pbias
     
     '''
     writes a csv file that contains a summary table of MOD16 data, flux tower data.
@@ -936,7 +1023,7 @@ class flux_reader:
             counter += 1
     
         fileobj.close()
-
+        
 class ppt_reader:
     
     def __init__(self, infile):
@@ -1058,29 +1145,30 @@ class download_modis:
 
 
 in_towers = r'C:\Users\Devin Simmons\Desktop\GEOL393\GIS\MOD16_2014_ET_Annual\flux_towers\fluxnet_sites\fluxnet_sites.shp'
-in_rasters = r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\gis_things\mod16_tiles\h13v04'
+in_rasters = r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\gis_things\mod16_tiles\h12v04'
 out_folder = r"C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\gis_things\clip_features"
 
 #downloading rasters for h13v04 from 2004 to 2010
-ca_qcu_years = [i for i in range(2004, 2011)]
+ca_na1_years = [2003]
 #creates a list of the julian days that correspond to MOD16 8day periods
-ca_qcu_days = [str(i).zfill(3) for i in range(1, 365, 8)]
+ca_na1_days = [str(i).zfill(3) for i in range(1, 365, 8)]
 
 #sets parameters needed to download the right files
-ca_qcu_rasters = download_modis(ca_qcu_years, ca_qcu_days, "h13v04",
+ca_na1_rasters = download_modis(ca_na1_years, ca_na1_days, "h13v04",
                                 r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\gis_things\mod16_tiles')
 #actually downloads these files
-ca_qcu_rasters.download_mod16()
+ca_na1_rasters.download_mod16()
 
-in_rasters = ca_qcu_rasters.mod16_folder
+in_rasters = ca_na1_rasters.mod16_folder
 
-test1 = modis_et(in_towers, "CA-Qcu", out_folder)
+test1 = modis_et(in_towers, "CA-Na1", out_folder)
 test1.make_buffer(1692)
 
 
 #without these lines the program had trouble reading the HDF files
 arcpy.env.workspace = in_rasters
 rasters = arcpy.ListRasters("*", "HDF")
+
 
 mod16_values = {}
 #clips the raster to the tower, determines its ET value, adds the julian day
@@ -1090,16 +1178,5 @@ for raster in rasters:
     print("clipped " + raster)
     mod16_values[test1.julian_day] = test1.mean_et
 
-        
-test_file = r"C:\Users\Devin Simmons\Desktop\GEOL393\flux_towers\figure_for_1st_pres\AMF_CA-Qcu_BASE_HH_1-1.csv"
+print(mod16_values)        
 
-test_flux = flux_reader(test_file)
-#determines ET measurements for each day, fills gaps
-test_flux.et_by_day()
-#groups these measurements into 8-day periods that align with MOD16
-in_flux = test_flux.valid_8day_by_year(2008)
-
-
-test_flux.yearly_error()
-#visualizes linreg of flux ET vs. MOD16 ET
-test_flux.linreg_et_plot(in_flux, mod16_values)
