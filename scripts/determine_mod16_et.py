@@ -1,4 +1,5 @@
-#Here are lines that show how I execute the code
+#This script downloads MOD16 files for a specific site, then clips them to the buffer zone around that site
+#it outputs MOD16 values that I then copied and pasted into another script (analysis.py)
 from flux_module import *
 
 #this shapefile can be found in the repository
