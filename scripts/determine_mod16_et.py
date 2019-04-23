@@ -1,6 +1,7 @@
 #This script downloads MOD16 files for a specific site, then clips them to the buffer zone around that site
 #it outputs MOD16 values that I then copied and pasted into another script (analysis.py)
 from flux_module import *
+import arcpy
 
 #this shapefile can be found in the repository
 in_towers = r'C:\Users\Devin Simmons\Desktop\GEOL393\GIS\MOD16_2014_ET_Annual\flux_towers\fluxnet_sites\fluxnet_sites.shp'
