@@ -70,6 +70,7 @@ class modis_et:
         return float(mean.getOutput(0))/10
 
 
+
 class flux_reader:
     
     '''
@@ -382,7 +383,7 @@ class flux_reader:
         percent_gaps *= 100
         errors *= 100
         
-        #commented out because this plot isn't terribly useful
+        #commented out because this plot isn't terribly useful but i may want it at some point
         
         #scatter plot of points
         # plt.scatter(percent_gaps, errors, color = '#e41a1c',
@@ -528,12 +529,12 @@ class flux_reader:
                  label='y = {:.2f}x + {:.2f}, R$^2$ = {:.2f}'.format(slope, intercept, r_value ** 2), 
                  color = '#7b3294', linewidth = 2.5)
 
-        
         plt.xlabel('Flux tower ET measurement in mm')
         plt.ylabel('MOD16 estimated ET in mm')
         plt.title('Comparison of 8-Day ET at {} Flux Tower'.format(self.tower))
 
-        plt.legend()
+        plt.legend(fontsize = 'small')
+        plt.axis('scaled')
         plt.savefig(r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\figures\linreg\{}_linreg.png'.format(self.tower), dpi = 350)
         plt.show()
     '''
@@ -609,7 +610,7 @@ class flux_reader:
     make a time series plot of flux data vs. modis data
     year should just be one year (may change this)
     '''
-    def time_series_plot(self, flux_et, mod16_et, ppt_data, year):
+    def time_series_plot(self, flux_et, mod16_et, year, ppt_data = None):
         self.flux_et = flux_et
         self.mod16_et = mod16_et
         self.ppt_data = ppt_data
@@ -636,10 +637,11 @@ class flux_reader:
                     flux_et_sorted = np.append(flux_et_sorted, self.flux_et[key][0])
                 else:
                     flux_et_sorted = np.append(flux_et_sorted, np.nan)
-                if key in ppt_keys:
-                    ppt_sorted = np.append(ppt_sorted, self.ppt_data[key]['ppt in mm'])
-                else:
-                    ppt_sorted = np.append(ppt_sorted, np.nan)
+                if ppt_data is not None:
+                    if key in ppt_keys:
+                        ppt_sorted = np.append(ppt_sorted, self.ppt_data[key]['ppt in mm'])
+                    else:
+                        ppt_sorted = np.append(ppt_sorted, np.nan)
 
         
         #gets rid of jd 361, which has no flux value associated
@@ -678,14 +680,14 @@ class flux_reader:
         
         blue = matplotlib.patches.Patch(color = '#74a9cf', label = 'Flux tower ET')
         dark_blue = matplotlib.patches.Patch(color = '#045a8d', label = 'MOD16 estimations')
-        purp = matplotlib.patches.Patch(color = '#984ea3', label = 'Precipitation')
+        #purp = matplotlib.patches.Patch(color = '#984ea3', label = 'Precipitation')
         
         plt.xticks([i for i in range (1, 356, 24)], [i for i in range (1, 356, 24)])
         plt.xlabel("Julian day that 8-day period began")
         plt.ylabel("ET in mm for 8-day period")
         plt.title("{} Time Series of MOD16 and Flux Tower ET at {}".format(year, self.tower))
         
-        plt.legend(handles = [blue, dark_blue, purp])
+        plt.legend(handles = [blue, dark_blue])
         
         plt.savefig(r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\figures\time_series\{}_{}_time_Series.png'.format(self.tower, year), dpi = 350)
     
@@ -988,9 +990,9 @@ class flux_reader:
         mod_keys.sort()
         
         fileobj = open(out_file, "w")
-        fileobj.write("8-day period start date (Julian),MOD16 estimated ET in mm,Flux Tower Measured ET in mm,Measurement Uncertainty as a Percentage,Days of Flux Tower Measurement in 8 day period \n")
+        fileobj.write("Tower Name,8-day period start date (Julian),MOD16 estimated ET in mm,Flux Tower Measured ET in mm,Measurement Uncertainty as a Percentage,Days of Flux Tower Measurement in 8 day period \n")
         for i in mod_keys:
-            fileobj.write("{}, {},".format(i, mod16_et[i]))
+            fileobj.write("{}, {}, {},".format(self.tower, i, mod16_et[i]))
             #writes nothing for days where (measurements == 48) < 5
             if i in self.flux_et:
                 error = abs(self.flux_et[i][1])
@@ -1023,7 +1025,11 @@ class flux_reader:
             counter += 1
     
         fileobj.close()
-        
+
+'''
+Used to read precipitation files from environment canada
+I did not end up using ppt analysis because of the high amount of missing data 
+'''
 class ppt_reader:
     
     def __init__(self, infile):
@@ -1098,6 +1104,9 @@ class ppt_reader:
         
         return eight_day_periods, ppt_values
 
+
+
+
 class download_modis:
     '''
     this class downloads modis data
@@ -1141,42 +1150,5 @@ class download_modis:
     
 
 
-#Here are lines that show how I execute the code
-
-
-in_towers = r'C:\Users\Devin Simmons\Desktop\GEOL393\GIS\MOD16_2014_ET_Annual\flux_towers\fluxnet_sites\fluxnet_sites.shp'
-in_rasters = r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\gis_things\mod16_tiles\h12v04'
-out_folder = r"C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\gis_things\clip_features"
-
-#downloading rasters for h13v04 from 2004 to 2010
-ca_na1_years = [2003]
-#creates a list of the julian days that correspond to MOD16 8day periods
-ca_na1_days = [str(i).zfill(3) for i in range(1, 365, 8)]
-
-#sets parameters needed to download the right files
-ca_na1_rasters = download_modis(ca_na1_years, ca_na1_days, "h13v04",
-                                r'C:\Users\Devin Simmons\Desktop\GEOL393\figure_for_rd\gis_things\mod16_tiles')
-#actually downloads these files
-ca_na1_rasters.download_mod16()
-
-in_rasters = ca_na1_rasters.mod16_folder
-
-test1 = modis_et(in_towers, "CA-Na1", out_folder)
-test1.make_buffer(1692)
-
-
-#without these lines the program had trouble reading the HDF files
-arcpy.env.workspace = in_rasters
-rasters = arcpy.ListRasters("*", "HDF")
-
-
-mod16_values = {}
-#clips the raster to the tower, determines its ET value, adds the julian day
-#that the 8 day period starts to a dictionary as a key with its ET value as the value
-for raster in rasters:
-    test1.clip_raster(raster)
-    print("clipped " + raster)
-    mod16_values[test1.julian_day] = test1.mean_et
-
-print(mod16_values)        
+        
 
